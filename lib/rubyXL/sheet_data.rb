@@ -32,5 +32,12 @@ module RubyXL
       @data[x] = nil
     end
 
+    def size
+  		@data.length
+  	end
+  	
+	  def <<(row)
+	  	@data << row
+	  end
   end
 end
