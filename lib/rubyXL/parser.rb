@@ -236,7 +236,7 @@ module RubyXL
                 inside_element 't' do
                   if value?
                     str = value
-                    wb.shared_strings[i] = str
+                    wb.shared_strings[i] ||= str
                     wb.shared_strings[str] = i unless @read_only
                     puts "shared_strings[#{i}] = '#{str}'." if @@debug
                   end
