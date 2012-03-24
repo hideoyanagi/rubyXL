@@ -99,7 +99,7 @@ module RubyXL
 
   class Parser
     @@parsed_column_hash = {}
-    @@debug = true
+    @@debug = false
     
     # converts cell string (such as "AA1") to matrix indices
     def self.convert_to_index(cell_string)
@@ -224,7 +224,6 @@ module RubyXL
       i = 0
 
       # Parse the file
-      puts "[#{Time.now}] Processing shared strings..." if @@debug
       Reader.new(filename) do
         for_element 'sst' do
           wb.num_strings = Integer(attribute('count'))
@@ -238,7 +237,6 @@ module RubyXL
                     str = value
                     wb.shared_strings[i] ||= str
                     wb.shared_strings[str] = i unless @read_only
-                    puts "shared_strings[#{i}] = '#{str}'." if @@debug
                   end
                 end
               end
@@ -247,7 +245,6 @@ module RubyXL
           end
         end
       end
-      puts "[#{Time.now}] done." if @@debug
 
       # Merge si > r > t into si > t; unnecessary?
       #shared_strings_xml.css('si').each_with_index do |node, i|
@@ -316,14 +313,13 @@ module RubyXL
                 # Parse contents
                 cell_xml = RubyXL::Parser.parse_xml(inner_xml)
 
+                # Get cell data and coerce type
                 cell_data = nil
                 v = cell_xml.css('v').first
                 unless v.nil?
-                  # Get cell data and coerce type
                   v_content = v.content ? v.content.strip : nil
                   if data_type == 's' # shared string
                     cell_data = wb.shared_strings[Integer(v_content)]
-                    puts "Using shared string: wb.shared_strings[#{Integer(v_content)}] = #{cell_data} for cell [#{cell_index[0]}][#{cell_index[1]}]" if @@debug
                   elsif data_type == 'str' # raw string
                     cell_data = v_content
                   elsif data_type == 'e' # error
@@ -361,6 +357,8 @@ module RubyXL
                 # Add Cell
                 worksheet.sheet_data[cell_index[0]][cell_index[1]] = Cell.new(worksheet, cell_index[0], cell_index[1],
                   cell_data, cell_formula, data_type, style_index, cell_formula_attr)
+                
+                cell_xml = nil
               end
             end
           end
