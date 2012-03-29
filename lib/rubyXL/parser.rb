@@ -45,6 +45,14 @@ module RubyXL
         self.instance_eval &block
       end
     end
+    
+    def current_cell
+      @current_cell
+    end
+
+    def current_cell=(val)
+      @current_cell = val
+    end
 
     def name
       @node.name
@@ -98,31 +106,50 @@ module RubyXL
   end
 
   class Parser
-    @@parsed_column_hash = {}
-    @@debug = false
+    @parsed_column_hash = {}
+    @data_only = false
+    @read_only = false
+    @debug = false
+    
+    def self.data_only
+      @data_only
+    end
+    
+    def self.data_only=(opt)
+      @data_only = opt
+    end
+
+    def self.read_only
+      @read_only
+    end
+    
+    def self.read_only=(opt)
+      @read_only = opt
+    end
     
     # converts cell string (such as "AA1") to matrix indices
     def self.convert_to_index(cell_string)
       index = Array.new(2)
-      index[0]=-1
-      index[1]=-1
-      if(cell_string =~ /^([A-Z]+)(\d+)$/)
-
+      index[0] = -1
+      index[1] = -1
+      if cell_string =~ /^([A-Z]+)(\d+)$/
         one = $1
         row = $2.to_i - 1 #-1 for 0 indexing
         col = 0
         i = 0
-        if @@parsed_column_hash[one].nil?
+
+        if @parsed_column_hash[one].nil?
           two = one.reverse #because of 26^i calculation
           two.each_byte do |c|
             int_val = c - 64 #converts A to 1
             col += int_val * 26**(i)
-            i=i+1
+            i += 1
           end
-          @@parsed_column_hash[one] = col
+          @parsed_column_hash[one] = col
         else
-          col = @@parsed_column_hash[one]
+          col = @parsed_column_hash[one]
         end
+
         col -= 1 #zer0 index
         index[0] = row
         index[1] = col
@@ -142,80 +169,88 @@ module RubyXL
         raise 'Not .xlsx or .xlsm excel file'
       end
 
-      @data_only = data_only
-      @read_only = read_only
+      self.data_only = data_only
+      self.read_only = read_only
 
       # copy excel file to zip file in same directory
-      dir_path = File.join(File.dirname(dir_path), make_safe_name(Time.now.to_s))
+      dir_path = File.join(File.dirname(dir_path), self.make_safe_name(Time.now.to_s))
       zip_path = dir_path + '.zip'
-      FileUtils.cp(file_path,zip_path)
-      MyZip.new.unzip(zip_path,dir_path)
+      FileUtils.cp(file_path, zip_path)
+      MyZip.new.unzip(zip_path, dir_path)
       File.delete(zip_path)
 
-      # parse workbook.xml
-      workbook_xml = Parser.parse_xml_file(File.join(dir_path, 'xl', 'workbook.xml'))
-      
-      # build workbook
-      @num_sheets = Integer(workbook_xml.css('sheets').children.size)
+      # build empty workbook
       wb = Workbook.new([nil], file_path)
-      wb.worksheets = Array.new(@num_sheets)
 
-      # extract everything we need from workbook.xml
-      wb.defined_names = workbook_xml.css('definedNames').to_s
-      wb.date1904 = workbook_xml.css('workbookPr').attribute('date1904').to_s == '1'
-      workbook_xml = nil
+      # parse workbook.xml
+      self.parse_xml_file(File.join(dir_path, 'xl', 'workbook.xml')) do |workbook_xml|
+        # build worksheets
+        @num_sheets = Integer(workbook_xml.css('sheets').children.size)
+        wb.worksheets = Array.new(@num_sheets)
 
-      app_xml = Parser.parse_xml_file(File.join(dir_path, 'docProps', 'app.xml'))
-      sheet_names = app_xml.css('TitlesOfParts vt|vector vt|lpstr').children
-      unless @data_only
-        # extract everything we need from app.xml
-        wb.company = app_xml.css('Company').children.to_s
-        wb.application = app_xml.css('Application').children.to_s
-        wb.appversion = app_xml.css('AppVersion').children.to_s
-      
-        # extract everything we need from core.xml
-        core_xml = Parser.parse_xml_file(File.join(dir_path, 'docProps', 'core.xml'))
-        wb.creator = core_xml.css('dc|creator').children.to_s
-        wb.modifier = core_xml.css('cp|last_modified_by').children.to_s
-        wb.created_at = core_xml.css('dcterms|created').children.to_s
-        wb.modified_at = core_xml.css('dcterms|modified').children.to_s
-        core_xml = nil
-
-        # preserve external links
-        wb.external_links = Parser.read_external_files(File.join(dir_path, 'xl', 'externalLinks'))
-        wb.drawings = Parser.read_external_files(File.join(dir_path, 'xl', 'drawings'))
-        wb.printer_settings = Parser.read_external_files(File.join(dir_path, 'xl', 'printerSettings'))
-        wb.worksheet_rels = Parser.read_external_files(File.join(dir_path, 'xl', 'worksheets', '_rels'))
-        wb.macros = Parser.read_external_files(File.join(dir_path, 'xl', 'vbaProject.bin'))
-        
-        # parse styles
-        styles_xml = Parser.parse_xml_file(File.join(dir_path, 'xl', 'styles.xml'))
-        Parser.fill_styles(wb, Hash.xml_node_to_hash(styles_xml.root))
-        styles_xml = nil
+        # extract everything we need from workbook.xml
+        wb.defined_names = workbook_xml.css('definedNames').to_s
+        wb.date1904 = workbook_xml.css('workbookPr').attribute('date1904').to_s == '1'
       end
-      app_xml = nil
+
+      sheet_names = nil
+      self.parse_xml_file(File.join(dir_path, 'docProps', 'app.xml')) do |app_xml|
+        sheet_names = app_xml.css('TitlesOfParts vt|vector vt|lpstr').children
+        unless self.data_only
+          # extract everything we need from app.xml
+          wb.company = app_xml.css('Company').children.to_s
+          wb.application = app_xml.css('Application').children.to_s
+          wb.appversion = app_xml.css('AppVersion').children.to_s
+        end
+      end
+
+      # parse styles
+      unless self.data_only
+        self.parse_xml_file(File.join(dir_path, 'xl', 'styles.xml')) do |styles_xml|
+          self.fill_styles(wb, Hash.xml_node_to_hash(styles_xml.root))
+        end
+      end
+
+      # extract everything we need from core.xml
+      unless self.data_only
+        self.parse_xml_file(File.join(dir_path, 'docProps', 'core.xml')) do |core_xml|
+          wb.creator = core_xml.css('dc|creator').children.to_s
+          wb.modifier = core_xml.css('cp|last_modified_by').children.to_s
+          wb.created_at = core_xml.css('dcterms|created').children.to_s
+          wb.modified_at = core_xml.css('dcterms|modified').children.to_s
+        end
+      end
+
+      # preserve external links
+      unless self.data_only
+        wb.external_links = self.read_external_files(File.join(dir_path, 'xl', 'externalLinks'))
+        wb.drawings = self.read_external_files(File.join(dir_path, 'xl', 'drawings'))
+        wb.printer_settings = self.read_external_files(File.join(dir_path, 'xl', 'printerSettings'))
+        wb.worksheet_rels = self.read_external_files(File.join(dir_path, 'xl', 'worksheets', '_rels'))
+        wb.macros = self.read_external_files(File.join(dir_path, 'xl', 'vbaProject.bin'))
+      end
 
       # extract everything we need from sharedStrings.xml
       wb.shared_strings = {}
-      parse_shared_strings(wb, File.join(dir_path, 'xl', 'sharedStrings.xml'))
+      self.parse_shared_strings(wb, File.join(dir_path, 'xl', 'sharedStrings.xml'))
 
       # parse the worksheets
       for i in 0..@num_sheets-1
         filename = 'sheet' + (i+1).to_s + '.xml'
-        wb.worksheets[i] = Parser.parse_worksheet(wb, File.join(dir_path, 'xl', 'worksheets', filename))
+        wb.worksheets[i] = self.parse_worksheet(wb, File.join(dir_path, 'xl', 'worksheets', filename))
         wb.worksheets[i].sheet_name = sheet_names[i].to_s
       end
 
       # cleanup
       FileUtils.rm_rf(dir_path)
-      return wb
+      wb
     end
 
     private
     
     def self.parse_shared_strings(wb, filename)
       # Store the whole file for later in case we need to write it out
-      if !@read_only and File.exists?(filename)
+      if !self.read_only and File.exists?(filename)
         File.open(filename, 'rb') do |f|
           wb.shared_strings_XML = f.read
         end
@@ -234,9 +269,8 @@ module RubyXL
               inside_element do
                 inside_element 't' do
                   if value?
-                    str = value
-                    wb.shared_strings[i] ||= str
-                    wb.shared_strings[str] = i unless @read_only
+                    wb.shared_strings[i] ||= value
+                    wb.shared_strings[value] = i unless RubyXL::Parser.read_only
                   end
                 end
               end
@@ -262,43 +296,41 @@ module RubyXL
       
       Reader.new(filename) do
         inside_element 'worksheet' do
-          unless @data_only
+          unless RubyXL::Parser.data_only
             for_element 'sheetViews' do
-              h = Hash.xml_node_to_hash(RubyXL::Parser.parse_xml(outer_xml).root)
+              h = RubyXL::Parser.xml_to_hash(outer_xml)
               worksheet.sheet_view = h[:sheetView] unless h.nil?
               worksheet.pane = worksheet.sheet_view[:pane] unless worksheet.sheet_view.nil?
             end
 
             for_element 'cols' do
-              h = Hash.xml_node_to_hash(RubyXL::Parser.parse_xml(outer_xml).root)
+              h = RubyXL::Parser.xml_to_hash(outer_xml)
               worksheet.cols = h[:col] unless h.nil?
             end
 
             for_element 'mergeCells' do
-              h = Hash.xml_node_to_hash(RubyXL::Parser.parse_xml(outer_xml).root)
+              h = RubyXL::Parser.xml_to_hash(outer_xml)
               worksheet.merged_cells = h[:mergeCell] unless h.nil?
             end
 
             for_element 'dataValidations' do
-              h = Hash.xml_node_to_hash(RubyXL::Parser.parse_xml(outer_xml).root)
+              h = RubyXL::Parser.xml_to_hash(outer_xml)
               worksheet.validations = h[:dataValidation] unless h.nil?
             end
 
             for_element 'extLst' do
-              worksheet.extLst = Hash.xml_node_to_hash(RubyXL::Parser.parse_xml(outer_xml).root)
+              worksheet.extLst = RubyXL::Parser.xml_to_hash(outer_xml)
             end
 
             for_element 'legacyDrawing' do
-              worksheet.legacy_drawing = Hash.xml_node_to_hash(RubyXL::Parser.parse_xml(outer_xml).root)
+              worksheet.legacy_drawing = RubyXL::Parser.xml_to_hash(outer_xml)
             end
           end
           
           inside_element 'sheetData' do
             inside_element 'row' do
-              if is_start? and !@data_only
-                row_style = '0'
-                row_style = attribute('s') unless attribute('s').nil?
-                worksheet.row_styles[attribute('r')] = { :style => row_style  }
+              if is_start? and !RubyXL::Parser.data_only
+                worksheet.row_styles[attribute('r')] = { :style => (attribute('s') || '0')  }
 
                 if !attribute('ht').nil? && !attribute('ht').strip == ""
                   worksheet.change_row_height(Integer(attribute('r'))-1, Float(attribute('ht')))
@@ -306,59 +338,58 @@ module RubyXL
               end
 
               for_element 'c' do
-                # Scan attributes
-                cell_index = Parser.convert_to_index(attribute('r'))
-                data_type = attribute('t')
-                
-                # Parse contents
-                cell_xml = RubyXL::Parser.parse_xml(inner_xml)
+                # Get cell index
+                current_cell = Parser.convert_to_index(attribute('r'))
 
-                # Get cell data and coerce type
-                cell_data = nil
-                v = cell_xml.css('v').first
-                unless v.nil?
-                  v_content = v.content ? v.content.strip : nil
-                  if data_type == 's' # shared string
-                    cell_data = wb.shared_strings[Integer(v_content)]
-                  elsif data_type == 'str' # raw string
-                    cell_data = v_content
-                  elsif data_type == 'e' # error
-                    cell_data = v_content
-                  elsif !v_content.nil? && v_content != ''
-                    data_type = ''
-                    if v_content =~ /\./ #is float
-                      cell_data = Float(v_content)
-                    else
-                      cell_data = Integer(v_content)
+                # Add cell if it doesn't exist
+                worksheet.sheet_data[current_cell[0]][current_cell[1]] ||= Cell.new(worksheet, current_cell[0], current_cell[1])
+                worksheet.sheet_data[current_cell[0]][current_cell[1]].datatype = attribute('t')
+                
+                inside_element do
+                  inside_element 'v' do
+                    # Coerce cell value to appropriate type
+                    cell_data = nil
+                    data_type = worksheet.sheet_data[current_cell[0]][current_cell[1]].datatype
+                    if data_type == 's' # shared string
+                      cell_data = wb.shared_strings[Integer(value)]
+                    elsif data_type == 'str' # raw string
+                      cell_data = value
+                    elsif data_type == 'e' # error
+                      cell_data = value
+                    elsif !value.nil? && value != ''
+                      worksheet.sheet_data[current_cell[0]][current_cell[1]].datatype = ''
+                      if value =~ /\./ #is float
+                        cell_data = Float(value)
+                      else
+                        cell_data = Integer(value)
+                      end
+                    end
+                    
+                    # Set cell value
+                    worksheet.sheet_data[current_cell[0]][current_cell[1]].value = cell_data
+                  end
+
+                  inside_element 'f' do
+                    # Set cell formula
+                    worksheet.sheet_data[current_cell[0]][current_cell[1]].formula = value
+                    
+                    # Set cell formula attributes
+                    worksheet.sheet_data[current_cell[0]][current_cell[1]].formula_attributes = {
+                      't' => attribute('t'),
+                      'ref' => attribute('ref'),
+                      'si' => attribute('si')
+                    }
+                  end
+
+                  inside_element 's' do
+                    # Set style index
+                    unless RubyXL::Parser.data_only
+                      unless value.nil? || value == ''
+                        worksheet.sheet_data[current_cell[0]][current_cell[1]].style_index = value.to_i
+                      end
                     end
                   end
                 end
-              
-                # Parse out formula
-                cell_formula = nil
-                cell_formula_attr = {}
-                f = cell_xml.css('f').first
-                unless f.nil?
-                  cell_formula = f.content
-                  cell_formula_attr['t'] = f.attribute('t')
-                  cell_formula_attr['ref'] = f.attribute('ref')
-                  cell_formula_attr['si'] = f.attribute('si')
-                end
-
-                # Get style
-                style_index = 0
-                unless @data_only
-                  s = cell_xml.css('s').first
-                  unless s.nil? || s.content.nil? || s.content == ''
-                    style_index = s.content.to_i
-                  end
-                end
-
-                # Add Cell
-                worksheet.sheet_data[cell_index[0]][cell_index[1]] = Cell.new(worksheet, cell_index[0], cell_index[1],
-                  cell_data, cell_formula, data_type, style_index, cell_formula_attr)
-                
-                cell_xml = nil
               end
             end
           end
@@ -432,25 +463,21 @@ module RubyXL
 
     def self.parse_options()
       opts = Nokogiri::XML::ParseOptions::DEFAULT_XML
-      opts |= Nokogiri::XML::ParseOptions::COMPACT if @read_only
+      opts |= Nokogiri::XML::ParseOptions::COMPACT if RubyXL::Parser.read_only
       opts
     end
     
-    def self.parse_xml(blob)
-      Nokogiri::XML.parse(blob, nil, nil, self.parse_options)
+    def self.xml_to_hash(blob)
+      Hash.xml_node_to_hash(Nokogiri::XML.parse(blob, nil, nil, self.parse_options).root)
     end
 
     def self.parse_xml_file(path)
-      retval = nil
-
       # Open, parse, and store it
       if File.exist?(path)
         File.open(path, 'rb') do |f|
-          retval = Nokogiri::XML.parse(f, nil, nil, self.parse_options)
+          yield Nokogiri::XML.parse(f, nil, nil, self.parse_options) if block_given?
         end
       end
-
-      retval
     end
 
     def self.read_external_files(path)

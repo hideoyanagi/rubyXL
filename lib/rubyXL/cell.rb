@@ -1,28 +1,27 @@
 module RubyXL
   class Cell < PrivateClass
 
-    attr_accessor :row, :column, :datatype, :style_index, :formula, :worksheet
-    attr_reader :workbook,:formula_attributes
+    attr_accessor :row, :column, :datatype, :style_index, :formula, :formula_attributes, :worksheet
+    attr_reader :workbook
 
     def initialize(worksheet,row,column,value=nil,formula=nil,datatype='s',style_index=0, fmla_attr={})
       @worksheet = worksheet
-
       @workbook = worksheet.workbook
       @row = row
       @column = column
       @datatype = datatype
       @value = value
-      @formula=formula
+      @formula = formula
       @style_index = style_index
       @formula_attributes = fmla_attr
     end
 
     def value
-      if is_date?
-        return @workbook.num_to_date(@value)
-      else
-        return @value
-      end
+      is_date? ? @workbook.num_to_date(@value) : @value
+    end
+    
+    def value=(val)
+      @value = val
     end
 
     def is_date?
@@ -31,7 +30,7 @@ module RubyXL
           num_fmt_id = xf_id()[:numFmtId]
           num_fmt = @workbook.num_fmts[:numFmt].select { |f| f[:attributes][:numFmtId] == num_fmt_id }[0]
           num_fmt = num_fmt.andand[:attributes].andand[:formatCode] unless num_fmt.nil?
-          if num_fmt && workbook.date_num_fmt?(num_fmt)
+          if num_fmt && @workbook.date_num_fmt?(num_fmt)
             return true
           end
         end
@@ -106,7 +105,7 @@ module RubyXL
     def change_font_name(font_name='Verdana')
       validate_worksheet
       # Get copy of font object with modified name
-      font = deep_copy(workbook.fonts[font_id().to_s][:font])
+      font = deep_copy(@workbook.fonts[font_id().to_s][:font])
       font[:name][:attributes][:val] = font_name.to_s
       # Update font and xf array
       change_font(font)
@@ -117,7 +116,7 @@ module RubyXL
       validate_worksheet
       if font_size.is_a?(Integer) || font_size.is_a?(Float)
         # Get copy of font object with modified size
-        font = deep_copy(workbook.fonts[font_id().to_s][:font])
+        font = deep_copy(@workbook.fonts[font_id().to_s][:font])
         font[:sz][:attributes][:val] = font_size
         # Update font and xf array
         change_font(font)
@@ -132,7 +131,7 @@ module RubyXL
       #if arg is a color name, convert to integer
       Color.validate_color(font_color)
       # Get copy of font object with modified color
-      font = deep_copy(workbook.fonts[font_id().to_s][:font])
+      font = deep_copy(@workbook.fonts[font_id().to_s][:font])
       font = modify_font_color(font, font_color.to_s)
       # Update font and xf array
       change_font(font)
@@ -142,7 +141,7 @@ module RubyXL
     def change_font_italics(italicized=false)
       validate_worksheet
       # Get copy of font object with modified italics settings
-      font = deep_copy(workbook.fonts[font_id().to_s][:font])
+      font = deep_copy(@workbook.fonts[font_id().to_s][:font])
       font = modify_font_italics(font, italicized)
       # Update font and xf array
       change_font(font)
@@ -152,7 +151,7 @@ module RubyXL
     def change_font_bold(bolded=false)
       validate_worksheet
       # Get copy of font object with modified bold settings
-      font = deep_copy(workbook.fonts[font_id().to_s][:font])
+      font = deep_copy(@workbook.fonts[font_id().to_s][:font])
       font = modify_font_bold(font, bolded)
       # Update font and xf array
       change_font(font)
@@ -162,7 +161,7 @@ module RubyXL
     def change_font_underline(underlined=false)
       validate_worksheet
       # Get copy of font object with modified underline settings
-      font = deep_copy(workbook.fonts[font_id().to_s][:font])
+      font = deep_copy(@workbook.fonts[font_id().to_s][:font])
       font = modify_font_underline(font, underlined)
       # Update font and xf array
       change_font(font)
@@ -172,7 +171,7 @@ module RubyXL
     def change_font_strikethrough(struckthrough=false)
       validate_worksheet
       # Get copy of font object with modified strikethrough settings
-      font = deep_copy(workbook.fonts[font_id().to_s][:font])
+      font = deep_copy(@workbook.fonts[font_id().to_s][:font])
       font = modify_font_strikethrough(font, struckthrough)
       # Update font and xf array
       change_font(font)
